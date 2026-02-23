@@ -1,55 +1,71 @@
 inventory_project/
-├── input/                          ← non-tabular reference documents
-│   ├── *.pdf                       (datasheets, manuals, quotes, certificates…)
-│   ├── *.docx, *.doc               (Word documents, supplier agreements…)
-│   ├── *.pptx, *.ppt               (PowerPoint presentations, meeting slides…)
-│   ├── *.jpg, *.jpeg, *.png        (photos of components, labels, packaging…)
-│   └── *.txt, *.md                 (plain text notes, README-like files)
-
+├── input/
+│   └── *.pdf, *.docx, *.doc, *.pptx, *.ppt, *.jpg, *.jpeg, *.png, *.txt, *.md    (non-tabular reference documents, images, notes)
+│
+│   └── SQL/
+│       └── *.sql    (manually written SQL queries, tests, analysis snippets)
+│
 ├── data/
-│   ├── input/                      ← structured / tabular input files
-│   │   ├── *.xlsx, *.xls           (Excel price lists, BOMs, inventory exports…)
-│   │   ├── *.csv, *.tsv            (CSV/TSV exports from suppliers or ERP)
-│   │   ├── *.parquet               (efficient columnar data dumps)
-│   │   ├── *.json, *.jsonl         (API responses, structured exports)
-│   │   └── *.feather               (fast Arrow-format files, optional)
+│   ├── input_data/
+│   │   └── *.csv, *.xlsx, *.xls, *.json, *.jsonl, *.parquet    (original structured/tabular input files — source of truth)
 │   │
-│   ├── processed/                  ← active / cleaned working data
-│   │   ├── *.db, *.sqlite, *.sqlite3   (SQLite databases → ProtoDataBase.db)
-│   │   ├── *.parquet               (processed / cleaned versions)
-│   │   └── *.feather               (fast intermediate files)
+│   │   ├── raw_materials/
+│   │   │   └── *.csv, *.xlsx    (metal price lists — current and historical)
 │   │
-│   └── backups/                    ← timestamped safety copies
-│       ├── backup_*.db
-│       ├── current_*.db
-│       └── *.db.bak, *.db.gz
-
+│   │   ├── electronics/
+│   │   │   └── *.csv, *.xlsx    (component and module price/stock lists)
+│   │
+│   │   ├── currencies/
+│   │   │   └── *.csv, *.xlsx    (exchange rate tables — current and historical)
+│   │
+│   │   ├── bom/
+│   │   │   └── *.xlsx, *.csv + subfolders with *.pdf, *.jpg, *.png, *.sch, *.kicad_pcb etc.    (product-specific BOM folders and attachments)
+│   │
+│   │   ├── stock_monitoring/
+│   │   │   └── *.csv, *.xlsx    (inventory level snapshots and time-series stock data)
+│   │
+│   │   ├── api_raw_responses/
+│   │   │   └── *.json, *.jsonl    (unprocessed raw API responses)
+│   │
+│   │   ├── suppliers/
+│   │   │   └── *.xlsx, *.csv    (supplier-specific price lists, terms, contact data)
+│   │
+│   │   └── archived/
+│   │       └── *.csv, *.xlsx, *.json    (old/inactive versions of input files kept for reference)
+│   │
+│   ├── database/
+│   │   └── *.db, *.sqlite, *.sqlite3    (active working SQLite database file(s) only)
+│   │
+│   └── backups/
+│       └── *.db, *.sqlite, *.sqlite3    (timestamped safety copies of the database)
+│
 ├── notebooks/
-│   ├── *.ipynb                     (main working notebooks)
+│   └── *.ipynb    (analysis, exploration and visualization notebooks)
+│
 │   ├── scratch/
-│   │   └── *.ipynb                 (temporary / throwaway notebooks)
+│   │   └── *.ipynb    (temporary / experimental notebooks)
+│   │
 │   └── outputs/
-│       ├── *.html                  (nbconvert HTML exports)
-│       ├── *.pdf                   (nbconvert PDF exports)
-│       └── *.slides.html           (reveal.js slideshows, optional)
-
+│       └── *.html, *.pdf, *.md    (exported notebook results)
+│
 ├── src/
-│   └── *.py                        (reusable modules → inventory_db.py, data_io.py, plots.py…)
-
+│   └── *.py    (reusable Python modules, configuration, utility scripts)
+│
 ├── output/
 │   ├── csv/
-│   │   └── *.csv                   (simple table exports)
+│   │   └── *.csv    (simple table exports)
 │   ├── excel/
-│   │   └── *.xlsx                  (formatted multi-sheet reports)
+│   │   └── *.xlsx    (formatted multi-sheet reports)
+│   ├── parquet/
+│   │   └── *.parquet    (efficient columnar data exports)
 │   ├── charts/
 │   │   ├── png/
-│   │   │   └── *.png               (raster images)
+│   │   │   └── *.png    (raster images)
 │   │   └── svg/
-│   │       └── *.svg               (vector images)
+│   │       └── *.svg    (vector images)
 │   └── reports/
-│       ├── *.pdf                   (final polished reports)
-│       └── *.html                  (self-contained HTML dashboards / summaries)
-
+│       ├── *.pdf    (final polished reports)
+│       └── *.html    (self-contained HTML dashboards / summaries)
+│
 └── logs/
-    └── *.log                       (application/script logs)
-    └── *.txt                       (plain text log exports)
+    └── *.log, *.txt    (application, script and error logs)

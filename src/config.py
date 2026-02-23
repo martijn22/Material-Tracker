@@ -9,8 +9,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 PATHS = {
     "RAW_DOCUMENTS":        PROJECT_ROOT / "input",
-    "STRUCTURED_INPUT":     PROJECT_ROOT / "data" / "input",
-    "PROCESSED_DATA":       PROJECT_ROOT / "data" / "processed",
+    "STRUCTURED_INPUT":     PROJECT_ROOT / "data" / "input_data",   # renamed for clarity
+    "DATABASE_FOLDER":      PROJECT_ROOT / "data" / "database",     # renamed (only DB files)
     "BACKUPS":              PROJECT_ROOT / "data" / "backups",
     "EXPORT_CSV":           PROJECT_ROOT / "output" / "csv",
     "EXPORT_EXCEL":         PROJECT_ROOT / "output" / "excel",
@@ -24,7 +24,7 @@ PATHS = {
     "LOGS":                 PROJECT_ROOT / "logs",
 }
 
-DATABASE_PATH = PATHS["PROCESSED_DATA"] / "ProtoDataBase.db"
+DATABASE_PATH = PATHS["DATABASE_FOLDER"] / "ProtoDataBase.db"
 
 DEFAULT_CURRENCY = "USD"
 DATE_FORMAT_DB = "%Y-%m-%d"
