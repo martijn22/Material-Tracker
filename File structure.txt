@@ -49,7 +49,8 @@ inventory_project/
 │       └── *.html, *.pdf, *.md    (exported notebook results)
 │
 ├── src/
-│   └── *.py    (reusable Python modules, configuration, utility scripts)
+│   └── *.py    		(reusable Python modules, configuration, utility scripts)
+│   └── __init__.py    (marks src/ as Python package – enables clean imports: for using with notebooks)
 │
 ├── output/
 │   ├── csv/

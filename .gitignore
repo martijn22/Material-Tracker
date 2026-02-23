@@ -60,3 +60,7 @@ data/input/**/FAKE_*  # already covered above, but extra safety
 
 # API raw responses (often huge and easily re-fetched)
 data/input/api_raw_responses/**
+
+# ── Regeneratable / transient input data ────────────────────────────────
+data/input_data/
+!data/input_data/.gitkeep          # optional: keeps the folder in git if empty 

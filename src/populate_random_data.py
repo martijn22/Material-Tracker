@@ -2,14 +2,15 @@
 """
 2026-02-20 accurate fake generator using real market levels from that date.
 Designed for seamless switch to real API (same file structure).
+Now includes full FAKE_* JSON API-style responses.
 Includes full reset capability.
 """
 
 import random
 import pandas as pd
+import json
 from datetime import datetime
 from pathlib import Path
-import os
 import sys
 
 from config import (
@@ -18,10 +19,10 @@ from config import (
     CURRENCIES_TO_TRACK, CURRENCY_BASE, CURRENCY_ANCHORS_20260220
 )
 
-RAW_DIR = PATHS["STRUCTURED_INPUT"] / "raw_materials"
+RAW_DIR         = PATHS["STRUCTURED_INPUT"] / "raw_materials"
 ELECTRONICS_DIR = PATHS["STRUCTURED_INPUT"] / "electronics"
-CURRENCIES_DIR = PATHS["STRUCTURED_INPUT"] / "currencies"
-API_RAW_DIR = PATHS["STRUCTURED_INPUT"] / "api_raw_responses"
+CURRENCIES_DIR  = PATHS["STRUCTURED_INPUT"] / "currencies"
+API_RAW_DIR     = PATHS["STRUCTURED_INPUT"] / "api_raw_responses"
 
 # Ensure directories exist
 for d in [RAW_DIR, ELECTRONICS_DIR, CURRENCIES_DIR, API_RAW_DIR]:
@@ -45,7 +46,7 @@ METAL_ANCHORS = {
     "Germanium": {"price": 950, "unit": "kg"},
 }
 
-# ── Generators ──
+# ── Generators (unchanged) ──────────────────────────────────────────────────
 
 def generate_current_metals():
     today = datetime.now().strftime(DATE_FORMAT_DB)
@@ -200,7 +201,69 @@ def generate_electronic_modules(n=200, seed=None):
     return pd.DataFrame(data)
 
 
-# ── File saving functions ──
+# ── NEW: Fake API JSON responses (exactly as requested) ─────────────────────
+
+def save_fake_api_json(df: pd.DataFrame, filename: str, extra_meta: dict | None = None):
+    """Save any DataFrame as a realistic fake API response JSON (with FAKE_ prefix)"""
+    API_RAW_DIR.mkdir(parents=True, exist_ok=True)
+
+    meta = {
+        "status": "success",
+        "fetched_at": datetime.now().isoformat(),
+        "source": "FAKE_API_SIMULATOR_20260220",
+        "record_count": len(df),
+    }
+    if extra_meta:
+        meta.update(extra_meta)
+
+    payload = {**meta, "data": df.to_dict(orient="records")}
+
+    path = API_RAW_DIR / filename
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+    print(f"Saved fake API response → {filename} ({len(df):,} records)")
+
+
+def generate_fake_api_responses():
+    """Generates all FAKE_* JSON files that look exactly like real API responses"""
+    print("\n=== Generating FAKE API raw responses ===")
+
+    save_fake_api_json(
+        generate_current_metals(),
+        "FAKE_metals_current.json",
+        {"endpoint": "/metals/current", "type": "metals_current"}
+    )
+    save_fake_api_json(
+        generate_metal_history(),
+        "FAKE_metals_history.json",
+        {"endpoint": "/metals/history", "type": "metals_history"}
+    )
+    save_fake_api_json(
+        generate_current_currencies(),
+        "FAKE_currencies_current.json",
+        {"endpoint": "/currencies/current", "type": "currencies_current"}
+    )
+    save_fake_api_json(
+        generate_currency_history(),
+        "FAKE_currencies_history.json",
+        {"endpoint": "/currencies/history", "type": "currencies_history"}
+    )
+    save_fake_api_json(
+        generate_electronics(),
+        "FAKE_electronics_components.json",
+        {"endpoint": "/electronics/components", "type": "electronics_components"}
+    )
+    save_fake_api_json(
+        generate_electronic_modules(),
+        "FAKE_electronics_modules.json",
+        {"endpoint": "/electronics/modules", "type": "electronics_modules"}
+    )
+
+    print("✅ All fake API responses generated.\n")
+
+
+# ── File saving functions (CSV) ─────────────────────────────────────────────
 
 def save_current_metals():
     df = generate_current_metals()
@@ -238,10 +301,10 @@ def save_modules():
     print(f"Saved: FAKE_electronic_modules.csv ({len(df)} rows)")
 
 
-# ── Cleanup functions ──
+# ── Cleanup functions (unchanged — already covers API folder) ───────────────
 
 def wipe_all_fake_files(dry_run=True, verbose=True):
-    """Delete all files starting with FAKE_ in monitored folders"""
+    """Delete all files starting with FAKE_ in monitored folders (including API JSONs)"""
     deleted = 0
     monitored = [RAW_DIR, ELECTRONICS_DIR, CURRENCIES_DIR, API_RAW_DIR]
     
@@ -265,12 +328,12 @@ def wipe_all_fake_files(dry_run=True, verbose=True):
     if dry_run:
         print(f"\nDry run: {deleted} files would be deleted.")
     else:
-        print(f"\nDeleted {deleted} FAKE_ files.")
+        print(f"\nDeleted {deleted} FAKE_ files (CSV + JSON).")
     return deleted
 
 
 def wipe_fake_file(filename_pattern: str, folder_name: str = None, dry_run=True, verbose=True):
-    """Delete specific FAKE_ file(s) matching pattern"""
+    """Delete specific FAKE_ file(s) — works for both CSV and JSON"""
     deleted = 0
     if not filename_pattern.startswith("FAKE_"):
         filename_pattern = "FAKE_" + filename_pattern.lstrip("FAKE_")
@@ -307,21 +370,21 @@ def wipe_fake_file(filename_pattern: str, folder_name: str = None, dry_run=True,
     return deleted
 
 
-# ── Full Reset Function ──
+# ── Full Reset & Normal generation (updated with API JSONs) ─────────────────
 
 def full_reset(confirm=False, load_after=True):
     """
     Complete reset workflow:
-    1. Wipe all FAKE_ files
-    2. Force recreate database
-    3. Generate new fake files
-    4. Optionally load them into DB
+    1. Wipe ALL FAKE_* files (CSV + JSON)
+    2. Recreate database
+    3. Generate fresh fake files (CSV + JSON API responses)
+    4. Load into DB (via classic CSV path — you can change to load_from_api_raw if preferred)
     """
     print("=== FULL PROJECT RESET ===")
     print("This will:")
-    print("  - DELETE all FAKE_* files")
+    print("  - DELETE all FAKE_* files (CSV + API JSONs)")
     print("  - DELETE and recreate the SQLite database")
-    print("  - Generate fresh fake data")
+    print("  - Generate fresh fake CSV + JSON API data")
     print("  - Optionally load into DB")
     
     if not confirm:
@@ -330,26 +393,27 @@ def full_reset(confirm=False, load_after=True):
             print("Reset cancelled.")
             return
     
-    print("\nStep 1: Wiping old FAKE files...")
+    print("\nStep 1: Wiping old FAKE files (including API JSONs)...")
     wipe_all_fake_files(dry_run=False, verbose=True)
     
     print("\nStep 2: Recreating database...")
     from inventory_db import create_database
     create_database(force_recreate=True)
     
-    print("\nStep 3: Generating new fake files...")
+    print("\nStep 3: Generating new fake files (CSV + API JSONs)...")
     save_current_metals()
     save_metal_history()
     save_current_currencies()
     save_currency_history()
     save_electronics()
     save_modules()
+    generate_fake_api_responses()          # ← your requested API generation
     
     if load_after:
         print("\nStep 4: Loading new data into database...")
         try:
             import data_io
-            data_io.load_all(clear_first=True)
+            data_io.load_all(clear_first=True)   # you can change to data_io.load_from_api_raw(clear_first=True)
         except ImportError:
             print("Warning: data_io.py not found or load_all() missing.")
         except Exception as e:
@@ -358,16 +422,16 @@ def full_reset(confirm=False, load_after=True):
     print("\n=== Reset complete ===")
 
 
-# ── Normal generation (default run) ──
-
 def generate_all():
-    print("Generating fresh FAKE data...")
+    """Normal run — generates everything including the new FAKE API JSONs"""
+    print("Generating fresh FAKE data (CSV + API JSON responses)...")
     save_current_metals()
     save_metal_history()
     save_current_currencies()
     save_currency_history()
     save_electronics()
     save_modules()
+    generate_fake_api_responses()          # ← included
     print("Generation complete.")
 
 
