@@ -14,3 +14,31 @@
 *.png   binary
 *.jpg   binary
 *.db    binary
+
+# Office / document binaries (very important!)
+*.xlsx  binary
+*.xls   binary
+*.docx  binary
+*.doc   binary
+*.pptx  binary
+*.ppt   binary
+*.pdf   binary
+
+# Other common binaries
+*.parquet binary
+*.feather binary
+*.zip    binary
+*.7z     binary
+
+# Images (you already have png/jpg — make it complete)
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+
+# SVG should stay text
+*.svg   text eol=lf
+
+# Jupyter notebooks (they are JSON)
+*.ipynb text eol=lf

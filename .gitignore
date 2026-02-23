@@ -29,11 +29,34 @@ ProtoDataBase.db
 *.sqlite3
 
 # Fake / generated data (you can regenerate anytime)
-data/input/FAKE_*.*
-data/input/real_*_old.*
+data/input/**/FAKE_*
+data/input/**/real_*_old.*
+
+# Also catch the one you already have with different casing
+data/input/**/Fake_*
 
 # Temp / OS files
 *.log
 *.tmp
 .DS_Store
 Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Temporary editor files
+*.swp
+*.swo
+*~
+
+# Mac/Windows specific (you already have most)
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Just in case someone runs the reset script and forgets
+data/input/**/FAKE_*  # already covered above, but extra safety
+
+# API raw responses (often huge and easily re-fetched)
+data/input/api_raw_responses/**
