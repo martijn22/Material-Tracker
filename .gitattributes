@@ -1,0 +1,16 @@
+# Auto-normalize line endings (prevents the 10k changes nightmare)
+* text=auto eol=lf
+
+# Force specific files to LF (best for Python & data)
+*.py    text eol=lf
+*.md    text eol=lf
+*.csv   text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+
+# Binary files
+*.png   binary
+*.jpg   binary
+*.db    binary

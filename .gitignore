@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+*.env
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Project-specific generated files (never commit these!)
+data/processed/
+data/backups/
+output/
+logs/
+notebooks/outputs/
+notebooks/scratch/
+
+# Database - changes constantly
+*.db
+ProtoDataBase.db
+*.sqlite
+*.sqlite3
+
+# Fake / generated data (you can regenerate anytime)
+data/input/FAKE_*.*
+data/input/real_*_old.*
+
+# Temp / OS files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

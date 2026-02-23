@@ -1,0 +1,55 @@
+inventory_project/
+├── input/                          ← non-tabular reference documents
+│   ├── *.pdf                       (datasheets, manuals, quotes, certificates…)
+│   ├── *.docx, *.doc               (Word documents, supplier agreements…)
+│   ├── *.pptx, *.ppt               (PowerPoint presentations, meeting slides…)
+│   ├── *.jpg, *.jpeg, *.png        (photos of components, labels, packaging…)
+│   └── *.txt, *.md                 (plain text notes, README-like files)
+
+├── data/
+│   ├── input/                      ← structured / tabular input files
+│   │   ├── *.xlsx, *.xls           (Excel price lists, BOMs, inventory exports…)
+│   │   ├── *.csv, *.tsv            (CSV/TSV exports from suppliers or ERP)
+│   │   ├── *.parquet               (efficient columnar data dumps)
+│   │   ├── *.json, *.jsonl         (API responses, structured exports)
+│   │   └── *.feather               (fast Arrow-format files, optional)
+│   │
+│   ├── processed/                  ← active / cleaned working data
+│   │   ├── *.db, *.sqlite, *.sqlite3   (SQLite databases → ProtoDataBase.db)
+│   │   ├── *.parquet               (processed / cleaned versions)
+│   │   └── *.feather               (fast intermediate files)
+│   │
+│   └── backups/                    ← timestamped safety copies
+│       ├── backup_*.db
+│       ├── current_*.db
+│       └── *.db.bak, *.db.gz
+
+├── notebooks/
+│   ├── *.ipynb                     (main working notebooks)
+│   ├── scratch/
+│   │   └── *.ipynb                 (temporary / throwaway notebooks)
+│   └── outputs/
+│       ├── *.html                  (nbconvert HTML exports)
+│       ├── *.pdf                   (nbconvert PDF exports)
+│       └── *.slides.html           (reveal.js slideshows, optional)
+
+├── src/
+│   └── *.py                        (reusable modules → inventory_db.py, data_io.py, plots.py…)
+
+├── output/
+│   ├── csv/
+│   │   └── *.csv                   (simple table exports)
+│   ├── excel/
+│   │   └── *.xlsx                  (formatted multi-sheet reports)
+│   ├── charts/
+│   │   ├── png/
+│   │   │   └── *.png               (raster images)
+│   │   └── svg/
+│   │       └── *.svg               (vector images)
+│   └── reports/
+│       ├── *.pdf                   (final polished reports)
+│       └── *.html                  (self-contained HTML dashboards / summaries)
+
+└── logs/
+    └── *.log                       (application/script logs)
+    └── *.txt                       (plain text log exports)
