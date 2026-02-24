@@ -1,8 +1,8 @@
 # src/data_io.py
 """
-Unified loader for both FAKE and real data files into ProtoDataBase.db
-Supports both classic CSV files and raw API-style JSON responses.
-Records source_file for traceability where applicable.
+Unified multi-format loader for the inventory project.
+Supports CSV, Excel (.xlsx), Parquet, JSON (API-style), HTML tables.
+Uses config.DATA_SOURCES for centralized configuration.
 """
 
 import sqlite3
@@ -12,379 +12,119 @@ from pathlib import Path
 from datetime import datetime
 import argparse
 
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+
 from config import (
     PATHS, DATABASE_PATH, DEFAULT_CURRENCY, DATE_FORMAT_DB,
-    METALS_TO_TRACK, USE_FAKE_PREFIX
+    METALS_TO_TRACK, USE_FAKE_PREFIX,
+    RAW_DIR, ELECTRONICS_DIR, CURRENCIES_DIR, API_RAW_DIR,
+    DATA_SOURCES
 )
 from inventory_db import backup_existing_database, show_inventory
 
 
-# ── Folder shortcuts ────────────────────────────────────────────────────────
-RAW_DIR         = PATHS["STRUCTURED_INPUT"] / "raw_materials"
-ELECTRONICS_DIR = PATHS["STRUCTURED_INPUT"] / "electronics"
-CURRENCIES_DIR  = PATHS["STRUCTURED_INPUT"] / "currencies"
-API_RAW_DIR     = PATHS["STRUCTURED_INPUT"] / "api_raw_responses"
-
-
-def get_file_path(base_name: str, folder: Path) -> Path | None:
-    """Find file with FAKE_ or real_ prefix, or plain name"""
-    prefixes = ["FAKE_", "real_", ""] if USE_FAKE_PREFIX else ["real_", "", "FAKE_"]
-    for prefix in prefixes:
-        candidate = folder / f"{prefix}{base_name}"
-        if candidate.exists():
-            return candidate
-    return None
-
-
-def get_api_file_path(base_name: str) -> Path | None:
-    """Same logic, but for api_raw_responses folder"""
-    prefixes = ["FAKE_", "real_", ""] if USE_FAKE_PREFIX else ["real_", "", "FAKE_"]
-    for prefix in prefixes:
-        candidate = API_RAW_DIR / f"{prefix}{base_name}"
-        if candidate.exists():
-            return candidate
-    return None
-
-
 def backup_before_load():
-    """Always backup before any destructive or large load operation"""
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Creating backup before load...")
-    success = backup_existing_database(reason="before-data-load")
-    if not success:
-        print("Backup failed → aborting load for safety.")
-        return False
-    return True
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Creating backup...")
+    return backup_existing_database(reason="multi-load")
 
 
 def clear_all_tables():
-    """Dangerous: wipe all data from relevant tables (use only for reset)"""
-    print("WARNING: Clearing all tables in database!")
+    print("Clearing all tables...")
     conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    tables = ["raw_materials", "components", "price_history", "currency_rates"]
-    for table in tables:
+    tables = ["raw_materials", "components", "price_history", "currency_rates",
+              "components_history", "modules_history"]
+    for t in tables:
         try:
-            cursor.execute(f"DELETE FROM {table}")
-            print(f"Cleared table: {table}")
-        except sqlite3.OperationalError as e:
-            print(f"Warning: Could not clear {table} — {e}")
+            conn.execute(f"DELETE FROM {t}")
+        except:
+            pass
     conn.commit()
     conn.close()
 
 
-# ── CSV-based loaders (original logic) ──────────────────────────────────────
+# ── Multi-format file reader ────────────────────────────────────────────────
 
-def load_metal_current():
-    file_name = "metal_prices_current.csv"
-    path = get_file_path(file_name, RAW_DIR)
-    if not path:
-        print(f"No metal current file found for {file_name}")
-        return 0
+def find_and_read_file(stem: str, folder: Path) -> list[tuple[pd.DataFrame, str]]:
+    """
+    Find ALL matching files for a stem and return list of (df, source_file)
+    """
+    extensions = [".csv", ".xlsx", ".parquet", ".json", ".html"]
+    prefixes = ["FAKE_", "real_", ""] if USE_FAKE_PREFIX else ["real_", "", "FAKE_"]
+    search_paths = [folder, API_RAW_DIR]
+    results = []
 
-    df = pd.read_csv(path)
+    for base_folder in search_paths:
+        for prefix in prefixes:
+            for ext in extensions:
+                candidate = base_folder / f"{prefix}{stem}{ext}"
+                if candidate.exists():
+                    try:
+                        if ext == ".csv":
+                            df = pd.read_csv(candidate)
+                        elif ext == ".xlsx":
+                            df = pd.read_excel(candidate)
+                        elif ext == ".parquet":
+                            df = pd.read_parquet(candidate)
+                        elif ext == ".json":
+                            with open(candidate, "r", encoding="utf-8") as f:
+                                payload = json.load(f)
+                            raw = payload.get("data", [])
+                            df = pd.DataFrame(raw) if isinstance(raw, list) else None
+                        elif ext == ".html" and HAS_BS4:
+                            tables = pd.read_html(str(candidate))
+                            df = tables[0] if tables else None
+                        else:
+                            df = None
+
+                        if df is not None and not df.empty:
+                            print(f"  Read {ext.upper()}: {candidate.name} ({len(df)} rows)")
+                            results.append((df, candidate.name))
+                    except Exception as e:
+                        print(f"  Error reading {candidate.name}: {e}")
+
+    if not results:
+        print(f"  No files found for '{stem}'")
+    return results
+
+
+# ── Insert functions ────────────────────────────────────────────────────────
+
+def insert_raw_materials_current(df: pd.DataFrame, source_file: str):
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     inserted = 0
-
     for _, row in df.iterrows():
-        metal = row.get("metal")
-        if metal not in METALS_TO_TRACK:
-            continue
-
         cursor.execute("""
             INSERT OR REPLACE INTO raw_materials
             (category, name, unit, price, currency, stock, last_updated, source_file)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            "metal",
-            metal,
+            row.get("category", "unknown"),
+            row.get("name"),
             row.get("unit", "unknown"),
-            row.get("price_usd_per_unit", row.get("price", 0)),
-            DEFAULT_CURRENCY,
-            0.0,
-            row.get("date", row.get("last_updated", datetime.now().strftime(DATE_FORMAT_DB))),
-            path.name
-        ))
-
-        cursor.execute("SELECT id FROM raw_materials WHERE name = ?", (metal,))
-        item_id = cursor.fetchone()
-        if item_id:
-            cursor.execute("""
-                INSERT OR IGNORE INTO price_history
-                (item_table, item_id, price, currency, source, date, source_file)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                "raw_materials",
-                item_id[0],
-                row.get("price_usd_per_unit", row.get("price", 0)),
-                DEFAULT_CURRENCY,
-                row.get("source", "MARKET_ANCHORED_20260220"),
-                row.get("date", datetime.now().strftime(DATE_FORMAT_DB)),
-                path.name
-            ))
-            inserted += 1
-
-    conn.commit()
-    conn.close()
-    print(f"→ Loaded/updated {inserted} current metal prices from {path.name}")
-    return inserted
-
-
-def load_metal_history():
-    file_name = "metal_price_history.csv"
-    path = get_file_path(file_name, RAW_DIR)
-    if not path:
-        print(f"No metal history file found for {file_name}")
-        return 0
-
-    df = pd.read_csv(path)
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    inserted = 0
-
-    for _, row in df.iterrows():
-        metal = row.get("metal")
-        cursor.execute("SELECT id FROM raw_materials WHERE name = ?", (metal,))
-        item_id = cursor.fetchone()
-        if item_id:
-            cursor.execute("""
-                INSERT OR IGNORE INTO price_history
-                (item_table, item_id, price, currency, source, date, source_file)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                "raw_materials",
-                item_id[0],
-                row.get("price_usd_per_unit", row.get("price", 0)),
-                DEFAULT_CURRENCY,
-                row.get("source", "HISTORICAL_ANCHORED"),
-                row.get("date"),
-                path.name
-            ))
-            inserted += 1
-
-    conn.commit()
-    conn.close()
-    print(f"→ Added {inserted:,} metal history rows from {path.name}")
-    return inserted
-
-
-def load_components_and_modules():
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    total_inserted = 0
-
-    for base_name in ["electronic_components.csv", "electronic_modules.csv"]:
-        path = get_file_path(base_name, ELECTRONICS_DIR)
-        if not path:
-            print(f"No file found for {base_name}")
-            continue
-
-        df = pd.read_csv(path)
-        inserted = 0
-
-        for _, row in df.iterrows():
-            cursor.execute("""
-                INSERT OR IGNORE INTO components
-                (category, part_number, description, price, currency, stock, last_updated, source_file)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                row.get("category", "unknown"),
-                row.get("part_number"),
-                row.get("description", ""),
-                row.get("price", 0),
-                row.get("currency", DEFAULT_CURRENCY),
-                row.get("stock", 0),
-                row.get("last_updated", row.get("date", datetime.now().strftime(DATE_FORMAT_DB))),
-                path.name
-            ))
-            inserted += cursor.rowcount
-
-        total_inserted += inserted
-        print(f"→ Added/updated {inserted} rows from {path.name}")
-
-    conn.commit()
-    conn.close()
-    return total_inserted
-
-
-def load_currency_current():
-    file_name = "currency_rates_current.csv"
-    path = get_file_path(file_name, CURRENCIES_DIR)
-    if not path:
-        print(f"No current currency file found for {file_name}")
-        return 0
-
-    df = pd.read_csv(path)
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    inserted = 0
-
-    for _, row in df.iterrows():
-        cursor.execute("""
-            INSERT OR IGNORE INTO currency_rates
-            (base, quote, rate, date, fetched_at, source)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            row.get("base", "USD"),
-            row.get("quote"),
-            row.get("rate"),
-            row.get("date"),
-            row.get("fetched_at"),
-            row.get("source", "MARKET_ANCHORED_20260220")
-        ))
-        inserted += cursor.rowcount
-
-    conn.commit()
-    conn.close()
-    print(f"→ Loaded {inserted} current currency rates from {path.name}")
-    return inserted
-
-
-def load_currency_history():
-    file_name = "currency_rates_history.csv"
-    path = get_file_path(file_name, CURRENCIES_DIR)
-    if not path:
-        print(f"No currency history file found for {file_name}")
-        return 0
-
-    df = pd.read_csv(path)
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    inserted = 0
-
-    for _, row in df.iterrows():
-        cursor.execute("""
-            INSERT OR IGNORE INTO currency_rates
-            (base, quote, rate, date, fetched_at, source)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            row.get("base", "USD"),
-            row.get("quote"),
-            row.get("rate"),
-            row.get("date"),
-            row.get("fetched_at"),
-            row.get("source", "HISTORICAL_ANCHORED")
-        ))
-        inserted += cursor.rowcount
-
-    conn.commit()
-    conn.close()
-    print(f"→ Added {inserted:,} currency history rows from {path.name}")
-    return inserted
-
-
-# ── API JSON loader ─────────────────────────────────────────────────────────
-
-def load_from_api_raw(response_base: str | None = None, clear_first: bool = False):
-    """
-    Load data from raw API-style JSON files (FAKE_* or real_*).
-    Expects files with structure: {"data": [...]} or flat list of records.
-    """
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Loading from API raw responses...")
-
-    if not backup_before_load():
-        return
-
-    if clear_first:
-        clear_all_tables()
-
-    files_to_try = [
-        "metals_current.json",
-        "metals_history.json",
-        "currencies_current.json",
-        "currencies_history.json",
-        "electronics_components.json",
-        "electronics_modules.json",
-    ] if response_base is None else [response_base]
-
-    for base_name in files_to_try:
-        path = get_api_file_path(base_name)
-        if not path:
-            print(f"  No file: {base_name} (tried FAKE_/real_/plain)")
-            continue
-
-        print(f"  Processing {path.name} ...")
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-
-        # Normalize: support {"data": [...]} and flat list
-        raw_data = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
-        if not isinstance(raw_data, list):
-            print(f"  → Skipping: invalid format in {path.name}")
-            continue
-
-        df = pd.DataFrame(raw_data)
-        fname = path.name.lower()
-        source_file = path.name
-
-        if "metals_current" in fname:
-            load_metal_current_from_df(df, source_file)   # we'll define helpers below
-        elif "metals_history" in fname:
-            load_metal_history_from_df(df, source_file)
-        elif "currencies" in fname:
-            load_currency_from_df(df)
-        elif "electronics_components" in fname or "electronics_modules" in fname:
-            load_components_from_df(df, source_file)
-        else:
-            print(f"  → Unknown API type: {path.name} — skipping")
-
-    show_inventory()
-    print("API raw loading complete.\n")
-
-
-# ── Reusable DF → DB insert helpers (to avoid code duplication) ─────────────
-
-def load_metal_current_from_df(df: pd.DataFrame, source_file: str):
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    inserted = 0
-    for _, row in df.iterrows():
-        metal = row.get("metal")
-        if metal not in METALS_TO_TRACK:
-            continue
-        cursor.execute("""
-            INSERT OR REPLACE INTO raw_materials
-            (category, name, unit, price, currency, stock, last_updated, source_file)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            "metal",
-            metal,
-            row.get("unit", "unknown"),
-            row.get("price_usd_per_unit", row.get("price", 0.0)),
+            row.get("price", 0.0),
             DEFAULT_CURRENCY,
             0.0,
             row.get("date", datetime.now().strftime(DATE_FORMAT_DB)),
             source_file
         ))
-        cursor.execute("SELECT id FROM raw_materials WHERE name = ?", (metal,))
-        item_id = cursor.fetchone()
-        if item_id:
-            cursor.execute("""
-                INSERT OR IGNORE INTO price_history
-                (item_table, item_id, price, currency, source, date, source_file)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                "raw_materials",
-                item_id[0],
-                row.get("price_usd_per_unit", row.get("price", 0.0)),
-                DEFAULT_CURRENCY,
-                row.get("source", "API_RAW"),
-                row.get("date", datetime.now().strftime(DATE_FORMAT_DB)),
-                source_file
-            ))
-            inserted += 1
+        inserted += 1
     conn.commit()
     conn.close()
-    print(f"  → Loaded {inserted} current metals from {source_file}")
+    print(f"  → Loaded {inserted} current raw materials from {source_file}")
+    return inserted
 
 
-def load_metal_history_from_df(df: pd.DataFrame, source_file: str):
+def insert_raw_materials_history(df: pd.DataFrame, source_file: str):
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     inserted = 0
     for _, row in df.iterrows():
-        metal = row.get("metal")
-        cursor.execute("SELECT id FROM raw_materials WHERE name = ?", (metal,))
+        cursor.execute("SELECT id FROM raw_materials WHERE name = ?", (row.get("name"),))
         item_id = cursor.fetchone()
         if item_id:
             cursor.execute("""
@@ -392,21 +132,69 @@ def load_metal_history_from_df(df: pd.DataFrame, source_file: str):
                 (item_table, item_id, price, currency, source, date, source_file)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
-                "raw_materials",
-                item_id[0],
-                row.get("price_usd_per_unit", row.get("price", 0.0)),
+                "raw_materials", item_id[0],
+                row.get("price", 0.0),
                 DEFAULT_CURRENCY,
-                row.get("source", "API_RAW"),
+                row.get("source", "IMPORT"),
                 row.get("date"),
                 source_file
             ))
             inserted += 1
     conn.commit()
     conn.close()
-    print(f"  → Added {inserted:,} metal history entries from {source_file}")
+    print(f"  → Added {inserted:,} raw material history rows from {source_file}")
+    return inserted
 
 
-def load_components_from_df(df: pd.DataFrame, source_file: str):
+def insert_currency_current(df: pd.DataFrame, source_file: str):
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    inserted = 0
+    for _, row in df.iterrows():
+        cursor.execute("""
+            INSERT OR IGNORE INTO currency_rates
+            (base, quote, rate, date, fetched_at, source)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            row.get("base", "USD"),
+            row.get("quote"),
+            row.get("rate"),
+            row.get("date"),
+            row.get("fetched_at"),
+            row.get("source", "IMPORT")
+        ))
+        inserted += cursor.rowcount
+    conn.commit()
+    conn.close()
+    print(f"  → Loaded {inserted} currency rates from {source_file}")
+    return inserted
+
+
+def insert_currency_history(df: pd.DataFrame, source_file: str):
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    inserted = 0
+    for _, row in df.iterrows():
+        cursor.execute("""
+            INSERT OR IGNORE INTO currency_rates
+            (base, quote, rate, date, fetched_at, source)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            row.get("base", "USD"),
+            row.get("quote"),
+            row.get("rate"),
+            row.get("date"),
+            row.get("fetched_at"),
+            row.get("source", "IMPORT_HISTORY")
+        ))
+        inserted += cursor.rowcount
+    conn.commit()
+    conn.close()
+    print(f"  → Loaded {inserted:,} historical currency rates from {source_file}")
+    return inserted
+
+
+def insert_components_current(df: pd.DataFrame, source_file: str):
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     inserted = 0
@@ -420,74 +208,114 @@ def load_components_from_df(df: pd.DataFrame, source_file: str):
             row.get("part_number"),
             row.get("description", ""),
             row.get("price", 0.0),
-            row.get("currency", DEFAULT_CURRENCY),
+            DEFAULT_CURRENCY,
             row.get("stock", 0),
-            row.get("last_updated", row.get("date", datetime.now().strftime(DATE_FORMAT_DB))),
+            row.get("last_updated", datetime.now().strftime(DATE_FORMAT_DB)),
             source_file
         ))
         inserted += cursor.rowcount
     conn.commit()
     conn.close()
     print(f"  → Loaded {inserted} components/modules from {source_file}")
+    return inserted
 
 
-def load_currency_from_df(df: pd.DataFrame):
+def insert_components_history(df: pd.DataFrame, source_file: str):
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     inserted = 0
     for _, row in df.iterrows():
         cursor.execute("""
-            INSERT OR IGNORE INTO currency_rates
-            (base, quote, rate, date, fetched_at, source)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO components_history
+            (category, part_number, price, stock, date, fetched_at, source_file, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            row.get("base", "USD"),
-            row.get("quote"),
-            row.get("rate"),
+            row.get("category", "unknown"),
+            row.get("part_number"),
+            row.get("price", 0.0),
+            row.get("stock", 0),
             row.get("date"),
             row.get("fetched_at"),
-            row.get("source", "API_RAW")
+            source_file,
+            row.get("source", "IMPORT")
         ))
         inserted += cursor.rowcount
     conn.commit()
     conn.close()
-    print(f"  → Loaded {inserted} currency rates from API JSON")
+    print(f"  → Inserted {inserted:,} rows into components_history from {source_file}")
+    return inserted
 
 
-# ── Classic unified entry point (CSV style) ─────────────────────────────────
+def insert_modules_history(df: pd.DataFrame, source_file: str):
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    inserted = 0
+    for _, row in df.iterrows():
+        cursor.execute("""
+            INSERT OR IGNORE INTO modules_history
+            (category, part_number, price, stock, date, fetched_at, source_file, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            row.get("category", "module"),
+            row.get("part_number"),
+            row.get("price", 0.0),
+            row.get("stock", 0),
+            row.get("date"),
+            row.get("fetched_at"),
+            source_file,
+            row.get("source", "IMPORT")
+        ))
+        inserted += cursor.rowcount
+    conn.commit()
+    conn.close()
+    print(f"  → Inserted {inserted:,} rows into modules_history from {source_file}")
+    return inserted
 
-def load_all(clear_first=False):
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Loading classic CSV data...")
+
+# ── Unified loader ──────────────────────────────────────────────────────────
+
+def load_all_sources(clear_first=False):
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Loading from config.DATA_SOURCES...")
+
     if not backup_before_load():
         return
     if clear_first:
         clear_all_tables()
-    load_metal_current()
-    load_metal_history()
-    load_components_and_modules()
-    load_currency_current()
-    load_currency_history()
+
+    loaded_stats = {}
+
+    for stem, info in DATA_SOURCES.items():
+        folder = info["folder"]
+        insert_func_name = info.get("insert_func")
+
+        print(f"\n→ {stem} ({info.get('description', 'unknown')})")
+
+        results = find_and_read_file(stem, folder)
+        if not results:
+            continue
+
+        for df, source_file in results:
+            if insert_func_name and insert_func_name in globals():
+                try:
+                    insert_func = globals()[insert_func_name]
+                    count = insert_func(df, source_file)
+                    loaded_stats.setdefault(stem, 0)
+                    loaded_stats[stem] += count
+                except Exception as e:
+                    print(f"  Insert failed for {source_file}: {e}")
+            else:
+                print(f"  No insert function defined for {stem} — skipping {source_file}")
+
     show_inventory()
-    print("Classic CSV load finished.")
+    print("\nLoaded stats:", loaded_stats)
+    print("Loading complete.\n")
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Load data into ProtoDataBase.db")
-    parser.add_argument("--clear", action="store_true", help="Clear tables before loading")
-    parser.add_argument("--fake", action="store_true", help="Force FAKE_ prefix mode")
-    parser.add_argument("--real", action="store_true", help="Force real_ prefix / plain name mode")
-    parser.add_argument("--api", action="store_true", help="Load from API-style JSON files instead of CSV")
-    parser.add_argument("--file", type=str, default=None, help="Load only this specific API file (e.g. metals_current.json)")
+    parser.add_argument("--clear", action="store_true")
     args = parser.parse_args()
 
-    if args.fake:
-        USE_FAKE_PREFIX = True
-    elif args.real:
-        USE_FAKE_PREFIX = False
-
-    if args.api:
-        load_from_api_raw(response_base=args.file, clear_first=args.clear)
-    else:
-        load_all(clear_first=args.clear)
+    load_all_sources(clear_first=args.clear)

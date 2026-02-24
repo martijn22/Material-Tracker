@@ -1,4 +1,9 @@
 # inventory_db.py
+"""
+Database setup, backup, and basic inspection for the inventory project.
+Updated to include components_history and modules_history tables.
+"""
+
 import sqlite3
 import pandas as pd
 from datetime import datetime
@@ -63,64 +68,105 @@ def create_database(force_recreate: bool = False):
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
 
+    # Core tables
     cursor.execute("""CREATE TABLE IF NOT EXISTS raw_materials (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        category      TEXT,
-        name          TEXT,
-        unit          TEXT,
-        price         REAL,
-        currency      TEXT DEFAULT 'USD',
-        stock         REAL DEFAULT 0.0,
-        last_updated  TEXT,
-        source_file   TEXT
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        category        TEXT,
+        name            TEXT,
+        unit            TEXT,
+        price           REAL,
+        currency        TEXT DEFAULT 'USD',
+        stock           REAL DEFAULT 0.0,
+        last_updated    TEXT,
+        source_file     TEXT,
+        api_fetched_at  TEXT,
+        api_timestamp   INTEGER
     )""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS components (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        category      TEXT,
-        part_number   TEXT UNIQUE,
-        description   TEXT,
-        price         REAL,
-        currency      TEXT DEFAULT 'USD',
-        stock         INTEGER DEFAULT 0,
-        last_updated  TEXT,
-        source_file   TEXT
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        category        TEXT,
+        part_number     TEXT UNIQUE,
+        description     TEXT,
+        price           REAL,
+        currency        TEXT DEFAULT 'USD',
+        stock           INTEGER DEFAULT 0,
+        last_updated    TEXT,
+        source_file     TEXT,
+        api_fetched_at  TEXT,
+        api_timestamp   INTEGER
     )""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS price_history (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_table    TEXT NOT NULL,
-        item_id       INTEGER NOT NULL,
-        price         REAL NOT NULL,
-        currency      TEXT DEFAULT 'USD',
-        source        TEXT,
-        date          TEXT NOT NULL,
-        source_file   TEXT,
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_table      TEXT NOT NULL,
+        item_id         INTEGER NOT NULL,
+        price           REAL NOT NULL,
+        currency        TEXT DEFAULT 'USD',
+        source          TEXT,
+        date            TEXT NOT NULL,
+        source_file     TEXT,
+        api_fetched_at  TEXT,
+        api_timestamp   INTEGER,
         UNIQUE(item_table, item_id, date)
     )""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS currency_rates (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        base          TEXT DEFAULT 'USD',
-        quote         TEXT NOT NULL,
-        rate          REAL NOT NULL,
-        date          TEXT NOT NULL,
-        fetched_at    TEXT,
-        source        TEXT,
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        base            TEXT DEFAULT 'USD',
+        quote           TEXT NOT NULL,
+        rate            REAL NOT NULL,
+        date            TEXT NOT NULL,
+        fetched_at      TEXT,
+        api_timestamp   INTEGER,
+        source          TEXT,
         UNIQUE(base, quote, date)
+    )""")
+
+    # New history tables (added for rich per-item time series)
+    cursor.execute("""CREATE TABLE IF NOT EXISTS components_history (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        category        TEXT,
+        part_number     TEXT,
+        price           REAL,
+        stock           INTEGER,
+        date            TEXT NOT NULL,
+        fetched_at      TEXT,
+        source_file     TEXT,
+        source          TEXT
+    )""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS modules_history (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        category        TEXT,
+        part_number     TEXT,
+        price           REAL,
+        stock           INTEGER,
+        date            TEXT NOT NULL,
+        fetched_at      TEXT,
+        source_file     TEXT,
+        source          TEXT
     )""")
 
     conn.commit()
     conn.close()
     print(f"→ Database ready: {DATABASE_PATH}")
+    print("  (includes components_history & modules_history tables)\n")
 
 
 def show_inventory():
     conn = sqlite3.connect(DATABASE_PATH)
     print("\n=== DATABASE SUMMARY ===")
-    for table in ["raw_materials", "components", "price_history", "currency_rates"]:
-        count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        print(f"  {table.ljust(20)} : {count:,} rows")
+    tables = [
+        "raw_materials", "components", "price_history", "currency_rates",
+        "components_history", "modules_history"
+    ]
+    for table in tables:
+        try:
+            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            print(f"  {table.ljust(25)} : {count:,} rows")
+        except sqlite3.OperationalError:
+            print(f"  {table.ljust(25)} : table does not exist yet")
     conn.close()
 
 
